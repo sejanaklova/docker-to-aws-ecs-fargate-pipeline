@@ -15,7 +15,6 @@ Parameters:
     Description: "This is the parameter that will provide the second endpoint `GET /parameter2` for the application."
     Default: "BYOOMKAASHA-KAASHAA-KAASHAA"
     NoEcho: true
-# Delete the token below later
   GithubAuthToken:
     Type: String
     Description: "Token used by codepipeline to verify if the incoming event comes from the github repo"
