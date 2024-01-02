@@ -5,22 +5,16 @@ Parameters:
   HostedZoneName:
     Type: String  
     Description: "Our R53 hosted zone for this task."
-    Default: 466496033297.realhandsonlabs.net
+    Default: 995515626231.realhandsonlabs.net
   HostedZoneId:
     Type: AWS::Route53::HostedZone::Id
-    Default: 'Z0454509AQA8ALW6NPES'
+    Default: 'Z04263664V0H56TGUDI'
     Description: ID for the hosted zone used for this task.
-  # ECSClusterName:
-  #   Type: String
-  #   Default: "workshop"
   SecureParameter:
     Type: String
     Description: "This is the parameter that will provide the second endpoint `GET /parameter2` for the application."
     Default: "BYOOMKAASHA-KAASHAA-KAASHAA"
     NoEcho: true
-  # RepositoryName:
-  #   Type: String
-  #   Default: "anyregion-workshop"
 # Delete the token below later
   GithubAuthToken:
     Type: String
@@ -71,7 +65,7 @@ Conditions:
 
 Resources:
 #Networking infra created conditionally if chosen to do so at runtime
-  WorkshopVPC:
+  HometaskVPC:
     Type: AWS::EC2::VPC
     Condition: NewNetworkResources
     Properties:
@@ -82,18 +76,18 @@ Resources:
       Tags:
         - Key: "Name"
           Value: hometask-vpc
-  WorkshopSG:
+  HometaskSG:
     Type: AWS::EC2::SecurityGroup
     Condition: NewNetworkResources
     Properties:
       GroupDescription: "Security Group conditionally created for this task."
       GroupName: hometask-sg
-      VpcId: !If [NewNetworkResources, !Ref WorkshopVPC, !Ref ExistingVPCId]
+      VpcId: !If [NewNetworkResources, !Ref HometaskVPC, !Ref ExistingVPCId]
 
   SGIngressHTTPRule:
     Type: 'AWS::EC2::SecurityGroupIngress'
     Properties:
-      GroupId: !If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]
+      GroupId: !If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]
       IpProtocol: tcp
       FromPort: 80
       ToPort: 80
@@ -101,34 +95,34 @@ Resources:
   SGIngressHTTPSRule:
     Type: 'AWS::EC2::SecurityGroupIngress'
     Properties:
-      GroupId: !If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]
+      GroupId: !If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]
       IpProtocol: tcp
       FromPort: 443
       ToPort: 443
       CidrIp: '0.0.0.0/0'
-
-  WorkshopIGW:
+      
+  HometaskIGW:
     Type: AWS::EC2::InternetGateway
     Condition: NewNetworkResources
-    DependsOn: WorkshopVPC
+    DependsOn: HometaskVPC
     Properties:
       Tags:
         - Key: "Name"
           Value: 'hometask-igw'    
-  WorkshopIGWAttachment:
+  HometaskIGWAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Condition: NewNetworkResources    
     Properties:
-      InternetGatewayId: !Ref WorkshopIGW
-      VpcId: !Ref WorkshopVPC
+      InternetGatewayId: !Ref HometaskIGW
+      VpcId: !Ref HometaskVPC
   PublicRT:
     Type: AWS::EC2::RouteTable
     Condition: NewNetworkResources 
     DependsOn:
-      - WorkshopIGW
-      - WorkshopIGWAttachment
+      - HometaskIGW
+      - HometaskIGWAttachment
     Properties:
-      VpcId: !Ref WorkshopVPC
+      VpcId: !Ref HometaskVPC
       Tags:
         - Key: "Name"
           Value: 'hometask-public-rt'
@@ -136,19 +130,19 @@ Resources:
     Type: AWS::EC2::Route
     Condition: NewNetworkResources 
     DependsOn:
-      - WorkshopIGWAttachment
+      - HometaskIGWAttachment
     Properties:
       RouteTableId: !Ref PublicRT
       DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref WorkshopIGW
-  WorkshopPublicSubnetA:
+      GatewayId: !Ref HometaskIGW
+  HometaskPublicSubnetA:
     Type: AWS::EC2::Subnet
     Condition: NewNetworkResources
     DependsOn:
-      - WorkshopIGW
+      - HometaskIGW
       - PublicRT
     Properties: 
-      VpcId: !Ref WorkshopVPC
+      VpcId: !Ref HometaskVPC
       CidrBlock: 10.0.0.0/26
       AvailabilityZone: !Select [0, !GetAZs '']
       MapPublicIpOnLaunch: true
@@ -160,7 +154,7 @@ Resources:
     Condition: NewNetworkResources
     Properties:
       RouteTableId: !Ref PublicRT
-      SubnetId: !Ref WorkshopPublicSubnetA
+      SubnetId: !Ref HometaskPublicSubnetA
   EIPA:
     Type: AWS::EC2::EIP
     Condition: NewNetworkResources
@@ -173,18 +167,18 @@ Resources:
       - EIPA
     Properties:
       AllocationId: !GetAtt EIPA.AllocationId
-      SubnetId: !Ref WorkshopPublicSubnetA
+      SubnetId: !Ref HometaskPublicSubnetA
       Tags:
         - Key: Name
           Value: 'hometask-natgw-a'
-  WorkshopPublicSubnetB:
+  HometaskPublicSubnetB:
     Type: AWS::EC2::Subnet
     Condition: NewNetworkResources
     DependsOn:
-      - WorkshopIGW
+      - HometaskIGW
       - PublicRT
     Properties: 
-      VpcId: !Ref WorkshopVPC
+      VpcId: !Ref HometaskVPC
       CidrBlock: 10.0.0.64/26
       AvailabilityZone: !Select [1, !GetAZs '']
       MapPublicIpOnLaunch: true
@@ -196,7 +190,7 @@ Resources:
     Condition: NewNetworkResources
     Properties:
       RouteTableId: !Ref PublicRT
-      SubnetId: !Ref WorkshopPublicSubnetB
+      SubnetId: !Ref HometaskPublicSubnetB
   EIPB:
     Type: AWS::EC2::EIP
     Condition: NewNetworkResources
@@ -209,7 +203,7 @@ Resources:
       - EIPB
     Properties:
       AllocationId: !GetAtt EIPB.AllocationId
-      SubnetId: !Ref WorkshopPublicSubnetB
+      SubnetId: !Ref HometaskPublicSubnetB
       Tags:
       - Key: Name
         Value: 'hometask-natgw-b'
@@ -219,7 +213,7 @@ Resources:
     DependsOn:
       - NATGWA
     Properties:
-      VpcId: !Ref WorkshopVPC
+      VpcId: !Ref HometaskVPC
       Tags:
         - Key: "Name"
           Value: 'hometask-private-rt-a'
@@ -230,14 +224,14 @@ Resources:
       RouteTableId: !Ref PrivateRTA
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NATGWA
-  WorkshopPrivateSubnetA:
+  HometaskPrivateSubnetA:
     Type: AWS::EC2::Subnet
     Condition: NewNetworkResources
     DependsOn:
       - NATGWA
       - PrivateRTA
     Properties: 
-      VpcId: !Ref WorkshopVPC
+      VpcId: !Ref HometaskVPC
       CidrBlock: 10.0.0.128/26
       AvailabilityZone: !Select [0, !GetAZs '']
       Tags: 
@@ -248,14 +242,14 @@ Resources:
     Condition: NewNetworkResources
     Properties:
       RouteTableId: !Ref PrivateRTA
-      SubnetId: !Ref WorkshopPrivateSubnetA 
+      SubnetId: !Ref HometaskPrivateSubnetA 
   PrivateRTB:
     Type: AWS::EC2::RouteTable
     Condition: NewNetworkResources
     DependsOn:
       - NATGWB
     Properties:
-      VpcId: !Ref WorkshopVPC
+      VpcId: !Ref HometaskVPC
       Tags:
         - Key: "Name"
           Value: 'hometask-private-rt-b'
@@ -266,14 +260,14 @@ Resources:
       RouteTableId: !Ref PrivateRTB
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId: !Ref NATGWB
-  WorkshopPrivateSubnetB:
+  HometaskPrivateSubnetB:
     Type: AWS::EC2::Subnet
     Condition: NewNetworkResources
     DependsOn:
       - NATGWB
       - PrivateRTB
     Properties: 
-      VpcId: !Ref WorkshopVPC
+      VpcId: !Ref HometaskVPC
       CidrBlock: 10.0.0.192/26
       AvailabilityZone: !Select [1, !GetAZs '']
       Tags: 
@@ -284,18 +278,17 @@ Resources:
     Condition: NewNetworkResources
     Properties:
       RouteTableId: !Ref PrivateRTB
-      SubnetId: !Ref WorkshopPrivateSubnetB
-###
+      SubnetId: !Ref HometaskPrivateSubnetB
 
-  # MyTLSCertificate:
-  #   Type: AWS::CertificateManager::Certificate
-  #   Properties:
-  #     DomainName: !Sub 'hometask.${HostedZoneName}'
-  #     KeyAlgorithm: RSA_2048
-  #     ValidationMethod: DNS
-  #     DomainValidationOptions:
-  #       - DomainName: !Sub 'hometask.${HostedZoneName}'
-  #         HostedZoneId:  !Ref HostedZoneId
+  MyTLSCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub 'hometask.${HostedZoneName}'
+      KeyAlgorithm: RSA_2048
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Sub 'hometask.${HostedZoneName}'
+          HostedZoneId:  !Ref HostedZoneId
   # DNSRecordSet:
   #   Type: 'AWS::Route53::RecordSet'
   #   DependsOn: MyTLSCertificate
@@ -314,11 +307,11 @@ Resources:
       Tier: "Standard"
       Type: String
       Value: !Ref SecureParameter 
-  # MyCWLogGroup:
-  #   Type: AWS::Logs::LogGroup
-  #   Properties:
-  #     LogGroupName: !Sub '/hometask'
-  #     RetentionInDays: 7
+  MyCWLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/hometask'
+      RetentionInDays: 7
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -464,11 +457,10 @@ Resources:
       Name: CodeBuildProject
       ServiceRole: !Ref CodeBuildRole
       Source:
-        Type: GITHUB
-        Location: !Sub 'https://github.com/${GithubAccount}/${GithubRepository}.git'
-        BuildSpec: buildspec.yml        
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
       Artifacts:
-        Type: NO_ARTIFACTS
+        Type: CODEPIPELINE
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
@@ -655,11 +647,11 @@ Resources:
   #     NetworkConfiguration:
   #       AwsvpcConfiguration:
   #         AssignPublicIp: ENABLED
-  #         SecurityGroups: [!If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]]
+  #         SecurityGroups: [!If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]]
   #         Subnets:
   #             Fn::If:
   #               - NewNetworkResources
-  #               - [ !Ref WorkshopPublicSubnetA, !Ref WorkshopPublicSubnetB ]
+  #               - [ !Ref HometaskPublicSubnetA, !Ref HometaskPublicSubnetB ]
   #               - Fn::Split:
   #                 - ","
   #                 - !Ref ExistingSubnetIds
@@ -683,11 +675,11 @@ Resources:
   #   Properties:
   #     Type: application
   #     Name: !Sub '${YourNametag}-workshop'
-  #     SecurityGroups: [!If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]]
+  #     SecurityGroups: [!If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]]
   #     Subnets:
   #         Fn::If:
   #           - NewNetworkResources
-  #           - [ !Ref WorkshopPublicSubnetA, !Ref WorkshopPublicSubnetB ]
+  #           - [ !Ref HometaskPublicSubnetA, !Ref HometaskPublicSubnetB ]
   #           - Fn::Split:
   #             - ","
   #             - !Ref ExistingSubnetIds 
@@ -703,7 +695,7 @@ Resources:
   #     Protocol: HTTP
   #     TargetType: ip
   #     HealthCheckProtocol: HTTP
-  #     VpcId: !If [NewNetworkResources, !Ref WorkshopVPC, !Ref ExistingVPCId]
+  #     VpcId: !If [NewNetworkResources, !Ref HometaskVPC, !Ref ExistingVPCId]
   # HTTPListener:
   #   Type: 'AWS::ElasticLoadBalancingV2::Listener'
   #   Properties:
@@ -732,12 +724,12 @@ Outputs:
     Value: !GetAtt ECSCluster.Arn
   ECRRepositoryNameOutput:
     Value: !Ref MyECRRepository 
-  # Deliverable1:
-  #   Description: "The URL that responds to the GET request with the value of hard-coded parameter1."
-  #   Value: !Sub 'https://hometask.${HostedZoneName}/parameter1'
-  # Deliverable2:
-  #   Description: "The URL that responds to the GET request with the value of secure parameter2 input at runtime"
-  #   Value: !Sub 'https://hometask.${HostedZoneName}/parameter2'
+  Deliverable1:
+    Description: "The URL that responds to the GET request with the value of hard-coded parameter1."
+    Value: !Sub 'https://hometask.${HostedZoneName}/parameter1'
+  Deliverable2:
+    Description: "The URL that responds to the GET request with the value of secure parameter2 input at runtime"
+    Value: !Sub 'https://hometask.${HostedZoneName}/parameter2'
 
 
 
