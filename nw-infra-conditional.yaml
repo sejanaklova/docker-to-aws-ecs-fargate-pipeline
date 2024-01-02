@@ -5,10 +5,10 @@ Parameters:
   HostedZoneName:
     Type: String  
     Description: "Our R53 hosted zone for this task."
-    Default: 063978471841.realhandsonlabs.net
+    Default: 466496033297.realhandsonlabs.net
   HostedZoneId:
     Type: AWS::Route53::HostedZone::Id
-    Default: 'Z04261401Q1KE9K20L22F'
+    Default: 'Z0454509AQA8ALW6NPES'
     Description: ID for the hosted zone used for this task.
   # ECSClusterName:
   #   Type: String
