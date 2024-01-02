@@ -1,0 +1,745 @@
+# VPC+subnets+EIPs+IGWs+NATGWs+SG, etc create optionally
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  HostedZoneName:
+    Type: String  
+    Description: "Our R53 hosted zone for this task."
+    Default: 063978471841.realhandsonlabs.net
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Default: 'Z04261401Q1KE9K20L22F'
+    Description: ID for the hosted zone used for this task.
+  # ECSClusterName:
+  #   Type: String
+  #   Default: "workshop"
+  SecureParameter:
+    Type: String
+    Description: "This is the parameter that will provide the second endpoint `GET /parameter2` for the application."
+    Default: "BYOOMKAASHA-KAASHAA-KAASHAA"
+    NoEcho: true
+  # RepositoryName:
+  #   Type: String
+  #   Default: "anyregion-workshop"
+# Delete the token below later
+  GithubAuthToken:
+    Type: String
+    Description: "Token used by codepipeline to verify if the incoming event comes from the github repo"
+    Default: "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"
+    NoEcho: true
+  GithubAccount:
+    Type: String
+    Description: "Github account name"
+    Default: "sejanaklova"
+  GithubRepository:
+    Type: String
+    Description: "Github repository name"
+    Default: "docker-to-aws-ecs-fargate-pipeline"
+  GithubBranch:
+    Type: String
+    Description: "Pipeline branch"
+    Default: "main"
+
+  CreateNetworkComponents:
+    Description: >-
+      "Selecting Yes will create new network resources for this lab and the IDs of existing VPC & subnets if passed to two parameters will be ignored.
+      Selecting No will use the VPC & subnet IDs passed to the next two paramaters."
+    Type: String
+    AllowedValues:
+      - "Yes"
+      - "No"
+    Default: "No"
+  ExistingVPCId:
+    Description: >-
+      "Provide the VPC ID to be used for this task if you selected No to create new network resources."
+    Type: String
+    Default: ""    
+  ExistingSubnetIds:
+    Description: >-
+      "Provide a comma-separated list of public subnet IDs to be used for this task, if you selected No to create new network resources.
+      Leave this field empty if you already selected Yes to create new network resources for this lab."
+    Type: String
+    Default: ""
+  ExistingSGId:
+    Description: >-
+      "Provide the Security Group ID to be used for this task if you selected No to create new network resources."
+    Type: String
+    Default: ""    
+
+Conditions:
+  NewNetworkResources: !Equals [!Ref CreateNetworkComponents, "Yes"]
+
+Resources:
+#Networking infra created conditionally if chosen to do so at runtime
+  WorkshopVPC:
+    Type: AWS::EC2::VPC
+    Condition: NewNetworkResources
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: "Name"
+          Value: hometask-vpc
+  WorkshopSG:
+    Type: AWS::EC2::SecurityGroup
+    Condition: NewNetworkResources
+    Properties:
+      GroupDescription: "Security Group conditionally created for this task."
+      GroupName: hometask-sg
+      VpcId: !If [NewNetworkResources, !Ref WorkshopVPC, !Ref ExistingVPCId]
+
+  SGIngressHTTPRule:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: '0.0.0.0/0'
+  SGIngressHTTPSRule:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: '0.0.0.0/0'
+
+  WorkshopIGW:
+    Type: AWS::EC2::InternetGateway
+    Condition: NewNetworkResources
+    DependsOn: WorkshopVPC
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-igw'    
+  WorkshopIGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: NewNetworkResources    
+    Properties:
+      InternetGatewayId: !Ref WorkshopIGW
+      VpcId: !Ref WorkshopVPC
+  PublicRT:
+    Type: AWS::EC2::RouteTable
+    Condition: NewNetworkResources 
+    DependsOn:
+      - WorkshopIGW
+      - WorkshopIGWAttachment
+    Properties:
+      VpcId: !Ref WorkshopVPC
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-public-rt'
+  DefaultRouteToIGW:
+    Type: AWS::EC2::Route
+    Condition: NewNetworkResources 
+    DependsOn:
+      - WorkshopIGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRT
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref WorkshopIGW
+  WorkshopPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - WorkshopIGW
+      - PublicRT
+    Properties: 
+      VpcId: !Ref WorkshopVPC
+      CidrBlock: 10.0.0.0/26
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-public-subnet-a'
+  PublicSubnetRTAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PublicRT
+      SubnetId: !Ref WorkshopPublicSubnetA
+  EIPA:
+    Type: AWS::EC2::EIP
+    Condition: NewNetworkResources
+    Properties:
+      Domain: vpc
+  NATGWA:
+    Type: AWS::EC2::NatGateway
+    Condition: NewNetworkResources
+    DependsOn:
+      - EIPA
+    Properties:
+      AllocationId: !GetAtt EIPA.AllocationId
+      SubnetId: !Ref WorkshopPublicSubnetA
+      Tags:
+        - Key: Name
+          Value: 'hometask-natgw-a'
+  WorkshopPublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - WorkshopIGW
+      - PublicRT
+    Properties: 
+      VpcId: !Ref WorkshopVPC
+      CidrBlock: 10.0.0.64/26
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-public-subnet-b'
+  PublicSubnetRTAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PublicRT
+      SubnetId: !Ref WorkshopPublicSubnetB
+  EIPB:
+    Type: AWS::EC2::EIP
+    Condition: NewNetworkResources
+    Properties:
+      Domain: vpc
+  NATGWB:
+    Type: AWS::EC2::NatGateway
+    Condition: NewNetworkResources
+    DependsOn:
+      - EIPB
+    Properties:
+      AllocationId: !GetAtt EIPB.AllocationId
+      SubnetId: !Ref WorkshopPublicSubnetB
+      Tags:
+      - Key: Name
+        Value: 'hometask-natgw-b'
+  PrivateRTA:
+    Type: AWS::EC2::RouteTable
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWA
+    Properties:
+      VpcId: !Ref WorkshopVPC
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-private-rt-a'
+  DefaultRouteToNGWA:
+    Type: AWS::EC2::Route
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGWA
+  WorkshopPrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWA
+      - PrivateRTA
+    Properties: 
+      VpcId: !Ref WorkshopVPC
+      CidrBlock: 10.0.0.128/26
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-private-subnet-a'
+  PrivateSubnetRTAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTA
+      SubnetId: !Ref WorkshopPrivateSubnetA 
+  PrivateRTB:
+    Type: AWS::EC2::RouteTable
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWB
+    Properties:
+      VpcId: !Ref WorkshopVPC
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-private-rt-b'
+  DefaultRouteToNGWB:
+    Type: AWS::EC2::Route
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGWB
+  WorkshopPrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWB
+      - PrivateRTB
+    Properties: 
+      VpcId: !Ref WorkshopVPC
+      CidrBlock: 10.0.0.192/26
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-private-subnet-b'
+  PrivateSubnetRTAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTB
+      SubnetId: !Ref WorkshopPrivateSubnetB
+###
+
+  # MyTLSCertificate:
+  #   Type: AWS::CertificateManager::Certificate
+  #   Properties:
+  #     DomainName: !Sub 'hometask.${HostedZoneName}'
+  #     KeyAlgorithm: RSA_2048
+  #     ValidationMethod: DNS
+  #     DomainValidationOptions:
+  #       - DomainName: !Sub 'hometask.${HostedZoneName}'
+  #         HostedZoneId:  !Ref HostedZoneId
+  # DNSRecordSet:
+  #   Type: 'AWS::Route53::RecordSet'
+  #   DependsOn: MyTLSCertificate
+  #   Properties:
+  #     HostedZoneId: !Ref HostedZoneId
+  #     Name: !Sub 'hometask.${HostedZoneName}'
+  #     Type: CNAME
+  #     TTL: '60'
+  #     ResourceRecords:
+  #       - !GetAtt LoadBalancer.DNSName
+  MySSMParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/hometask/secure-parameter"
+      Description: "Parameter input at the runtime."
+      Tier: "Standard"
+      Type: String
+      Value: !Ref SecureParameter 
+  # MyCWLogGroup:
+  #   Type: AWS::Logs::LogGroup
+  #   Properties:
+  #     LogGroupName: !Sub '/hometask'
+  #     RetentionInDays: 7
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: "Grants containers permissions to call AWS APIs on your behalf"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies: 
+        - PolicyName: hometask-taskRole-inlinepolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: TaskStatement1
+                Effect: Allow
+                Action:
+                  - 'ssm:GetParametersByPath'
+                  - 'ssm:GetParameters'
+                  - 'ssm:GetParameter'
+                Resource:
+                  Fn::Sub:
+                    'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/hometask/secure-parameter'
+      RoleName: !Sub '${AWS::Region}-hometask-taskRole'
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: "Allows ECS tasks to call AWS services on your behalf."
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies: 
+        - PolicyName: hometask-taskExecutionRole-inlinepolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: TaskExecutionStatement1
+                Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                Resource: '*'
+              - Sid: TaskExecutionStatement2
+                Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogStreams'
+                Resource: 'arn:aws:logs:*:*:*'
+              - Sid: TaskExecutionStatement3
+                Effect: Allow
+                Action:
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                Resource: !GetAtt MyECRRepository.Arn
+      RoleName: !Sub '${AWS::Region}-hometask-taskExecutionRole'
+  # MyTaskDefinition:
+  #   Type: AWS::ECS::TaskDefinition
+  #   Properties:
+  #     ContainerDefinitions: 
+  #       - Name: hometask
+  #         Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepositoryName}:latest'
+  #         Cpu: 0
+  #         Links: []
+  #         PortMappings: 
+  #           - ContainerPort: 80
+  #             HostPort: 80
+  #             Protocol: tcp
+  #         Essential: true
+  #         EntryPoint: []
+  #         Command: []
+  #         Environment:
+  #           - Name: PORT
+  #             Value: '80'
+  #           - Name: PARAMETER_1_VALUE
+  #             Value: "Eyooo it's my parameter"
+  #           - Name: PARAMETER_2_NAME
+  #             Value: !Ref MySSMParameter
+  #         EnvironmentFiles: []
+  #         MountPoints: []
+  #         VolumesFrom: []
+  #         DnsServers: []
+  #         DnsSearchDomains: []
+  #         ExtraHosts: []
+  #         DockerSecurityOptions: []
+  #         DockerLabels: {}
+  #         Ulimits: []
+  #         LogConfiguration:
+  #           LogDriver: awslogs
+  #           Options:
+  #             awslogs-group: !Ref MyCWLogGroup
+  #             awslogs-region: !Sub '${AWS::Region}'
+  #             awslogs-stream-prefix: 'hometask'
+  #           SecretOptions: []
+  #         SystemControls: []
+  #     Cpu: "256"
+  #     Family: 'hometask'
+  #     Memory: "512"
+  #     NetworkMode: "awsvpc"
+  #     RequiresCompatibilities: 
+  #       - "FARGATE"
+  #     TaskRoleArn: !GetAtt TaskRole.Arn
+  #     ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+  #     Tags:
+  #       - Key: "Workshop name"
+  #         Value: 'hometask'            
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: hometask
+      CapacityProviders:
+      - FARGATE
+      - FARGATE_SPOT
+      ClusterSettings:
+      - Name: containerInsights
+        Value: disabled
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: DEFAULT
+  #     ServiceConnectDefaults:
+  #       Namespace: ECSClusterNamespace
+
+  MyECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: hometask
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: MUTABLE
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: CodeBuildProject
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: GITHUB
+        Location: !Sub 'https://github.com/${GithubAccount}/${GithubRepository}.git'
+        BuildSpec: buildspec.yml        
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_ECR_REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${MyECRRepository}
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref MyECRRepository
+          - Name: IMAGE_TAG
+            Value: "latest"
+
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: ECSPipeline
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      RestartExecutionOnUpdate: true
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              InputArtifacts: []
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts:
+                - Name: SourceCode
+              Configuration:
+                Owner: !Ref GithubAccount
+                Repo: !Ref GithubRepository
+                Branch: !Ref GithubBranch
+                PollForSourceChanges: false
+                OAuthToken: !Ref GithubAuthToken
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: SourceCode
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 2
+    DependsOn: MyECRRepository
+     
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: "GetAndPutArtifacts"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub ${ArtifactBucket.Arn}/*
+        - PolicyName: "StartCodeBuild"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource:
+                  - !GetAtt CodeBuildProject.Arn
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: "PushImageToEcr"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+        - PolicyName: "CodeBuildLogsRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+        - PolicyName: "GetAndPutArtifacts"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub ${ArtifactBucket.Arn}/*
+  GithubWebhook:
+    Type: "AWS::CodePipeline::Webhook"
+    Properties:
+      Authentication: "GITHUB_HMAC"
+      AuthenticationConfiguration:
+        SecretToken: !Ref GithubAuthToken
+      RegisterWithThirdParty: true
+      TargetPipeline: !Ref CodePipeline
+      TargetAction: Source
+      TargetPipelineVersion: !GetAtt CodePipeline.Version
+      Filters:
+        - JsonPath: "$.ref"
+          MatchEquals: refs/heads/{Branch}          
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+
+  # ECSService:
+  #   Type: AWS::ECS::Service
+  #   DependsOn:
+  #     - HTTPListener
+  #   Properties:
+  #     Cluster: !Ref MyECSCluster
+  #     CapacityProviderStrategy:
+  #       - CapacityProvider: FARGATE
+  #         Base: 0
+  #         Weight: 1
+  #     TaskDefinition: !Ref MyTaskDefinition
+  #     ServiceName: !Sub '${YourNametag}-workshop'
+  #     SchedulingStrategy: REPLICA
+  #     DesiredCount: 1
+  #     LoadBalancers:
+  #       - ContainerName: !Sub '${YourNametag}-workshop'
+  #         ContainerPort: 80
+  #         LoadBalancerName: !Ref 'AWS::NoValue'
+  #         TargetGroupArn: !Ref TargetGroup
+  #     HealthCheckGracePeriodSeconds: '10'
+  #     NetworkConfiguration:
+  #       AwsvpcConfiguration:
+  #         AssignPublicIp: ENABLED
+  #         SecurityGroups: [!If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]]
+  #         Subnets:
+  #             Fn::If:
+  #               - NewNetworkResources
+  #               - [ !Ref WorkshopPublicSubnetA, !Ref WorkshopPublicSubnetB ]
+  #               - Fn::Split:
+  #                 - ","
+  #                 - !Ref ExistingSubnetIds
+  #     PlatformVersion: LATEST
+  #     DeploymentConfiguration:
+  #       MaximumPercent: 200
+  #       MinimumHealthyPercent: 100
+  #       DeploymentCircuitBreaker:
+  #         Enable: true
+  #         Rollback: true
+  #     DeploymentController:
+  #       Type: ECS
+  #     ServiceConnectConfiguration:
+  #       Enabled: false
+  #     EnableECSManagedTags: true
+  #     Tags:
+  #       - Key: "Workshop name"
+  #         Value: !Sub '${YourNametag}-workshop'    
+  # LoadBalancer:
+  #   Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  #   Properties:
+  #     Type: application
+  #     Name: !Sub '${YourNametag}-workshop'
+  #     SecurityGroups: [!If [NewNetworkResources, !GetAtt WorkshopSG.GroupId, !Ref ExistingSGId]]
+  #     Subnets:
+  #         Fn::If:
+  #           - NewNetworkResources
+  #           - [ !Ref WorkshopPublicSubnetA, !Ref WorkshopPublicSubnetB ]
+  #           - Fn::Split:
+  #             - ","
+  #             - !Ref ExistingSubnetIds 
+  #     Tags:
+  #       - Key: "Workshop name"
+  #         Value: !Sub '${YourNametag}-workshop'  
+  # TargetGroup:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties:
+  #     HealthCheckPath: "/parameter1"
+  #     Name: !Sub '${YourNametag}-workshop'
+  #     Port: 80
+  #     Protocol: HTTP
+  #     TargetType: ip
+  #     HealthCheckProtocol: HTTP
+  #     VpcId: !If [NewNetworkResources, !Ref WorkshopVPC, !Ref ExistingVPCId]
+  # HTTPListener:
+  #   Type: 'AWS::ElasticLoadBalancingV2::Listener'
+  #   Properties:
+  #     DefaultActions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref TargetGroup
+  #     LoadBalancerArn: !Ref LoadBalancer
+  #     Port: 80
+  #     Protocol: HTTP
+  # HTTPSListener:
+  #   Type: 'AWS::ElasticLoadBalancingV2::Listener'
+  #   Properties:
+  #     DefaultActions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref TargetGroup
+  #     Certificates:
+  #       - CertificateArn: !Ref MyTLSCertificate 
+  #     LoadBalancerArn: !Ref LoadBalancer
+  #     Port: 443
+  #     Protocol: HTTPS
+
+Outputs:
+  ECSClusterName:
+    Value: !Ref ECSCluster
+  ECSClusterARN:
+    Value: !GetAtt ECSCluster.Arn
+  ECRRepositoryNameOutput:
+    Value: !Ref MyECRRepository 
+  # Deliverable1:
+  #   Description: "The URL that responds to the GET request with the value of hard-coded parameter1."
+  #   Value: !Sub 'https://hometask.${HostedZoneName}/parameter1'
+  # Deliverable2:
+  #   Description: "The URL that responds to the GET request with the value of secure parameter2 input at runtime"
+  #   Value: !Sub 'https://hometask.${HostedZoneName}/parameter2'
+
+
+
+
+
