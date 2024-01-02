@@ -2,20 +2,19 @@
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
-  HostedZoneName:
-    Type: String  
-    Description: "Our R53 hosted zone for this task."
-    Default: 995515626231.realhandsonlabs.net
-  HostedZoneId:
-    Type: AWS::Route53::HostedZone::Id
-    Default: 'Z04263664V0H56TGUDI'
-    Description: ID for the hosted zone used for this task.
+  # HostedZoneName:
+  #   Type: String  
+  #   Description: "Our R53 hosted zone for this task."
+  #   Default: 995515626231.realhandsonlabs.net
+  # HostedZoneId:
+  #   Type: AWS::Route53::HostedZone::Id
+  #   Default: 'Z04263664V0H56TGUDI'
+  #   Description: ID for the hosted zone used for this task.
   SecureParameter:
     Type: String
     Description: "This is the parameter that will provide the second endpoint `GET /parameter2` for the application."
     Default: "BYOOMKAASHA-KAASHAA-KAASHAA"
     NoEcho: true
-# Delete the token below later
   GithubAuthToken:
     Type: String
     Description: "Token used by codepipeline to verify if the incoming event comes from the github repo"
@@ -561,25 +560,25 @@ Resources:
   ArtifactBucket:
     Type: AWS::S3::Bucket
 
-  MyTLSCertificate:
-    Type: AWS::CertificateManager::Certificate
-    Properties:
-      DomainName: !Sub 'hometask.${HostedZoneName}'
-      KeyAlgorithm: RSA_2048
-      ValidationMethod: DNS
-      DomainValidationOptions:
-        - DomainName: !Sub 'hometask.${HostedZoneName}'
-          HostedZoneId:  !Ref HostedZoneId
-  DNSRecordSet:
-    Type: 'AWS::Route53::RecordSet'
-    DependsOn: MyTLSCertificate
-    Properties:
-      HostedZoneId: !Ref HostedZoneId
-      Name: !Sub 'hometask.${HostedZoneName}'
-      Type: CNAME
-      TTL: '60'
-      ResourceRecords:
-        - !GetAtt LoadBalancer.DNSName
+  # MyTLSCertificate:
+  #   Type: AWS::CertificateManager::Certificate
+  #   Properties:
+  #     DomainName: !Sub 'hometask.${HostedZoneName}'
+  #     KeyAlgorithm: RSA_2048
+  #     ValidationMethod: DNS
+  #     DomainValidationOptions:
+  #       - DomainName: !Sub 'hometask.${HostedZoneName}'
+  #         HostedZoneId:  !Ref HostedZoneId
+  # DNSRecordSet:
+  #   Type: 'AWS::Route53::RecordSet'
+  #   DependsOn: MyTLSCertificate
+  #   Properties:
+  #     HostedZoneId: !Ref HostedZoneId
+  #     Name: !Sub 'hometask.${HostedZoneName}'
+  #     Type: CNAME
+  #     TTL: '60'
+  #     ResourceRecords:
+  #       - !GetAtt LoadBalancer.DNSName
 
   ECSService:
     Type: AWS::ECS::Service
@@ -708,17 +707,17 @@ Resources:
       LoadBalancerArn: !Ref LoadBalancer
       Port: 80
       Protocol: HTTP
-  HTTPSListener:
-    Type: 'AWS::ElasticLoadBalancingV2::Listener'
-    Properties:
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TargetGroup
-      Certificates:
-        - CertificateArn: !Ref MyTLSCertificate 
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 443
-      Protocol: HTTPS
+  # HTTPSListener:
+  #   Type: 'AWS::ElasticLoadBalancingV2::Listener'
+  #   Properties:
+  #     DefaultActions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref TargetGroup
+  #     Certificates:
+  #       - CertificateArn: !Ref MyTLSCertificate 
+  #     LoadBalancerArn: !Ref LoadBalancer
+  #     Port: 443
+  #     Protocol: HTTPS
 
   SnsTopicCodeBuild:
     Type: AWS::SNS::Topic
@@ -788,22 +787,22 @@ Resources:
           PolicyName: sns-role-policy
 
 Outputs:
-  ECSClusterName:
-    Value: !Ref ECSCluster
-  ECSClusterARN:
-    Value: !GetAtt ECSCluster.Arn
-  ECRRepositoryNameOutput:
-    Value: !Ref MyECRRepository
-  ECRRepositoryURIOutput:
-    Value:  !GetAtt MyECRRepository.RepositoryUri  
+  # ECSClusterName:
+  #   Value: !Ref ECSCluster
+  # ECSClusterARN:
+  #   Value: !GetAtt ECSCluster.Arn
+  # ECRRepositoryNameOutput:
+  #   Value: !Ref MyECRRepository
+  # ECRRepositoryURIOutput:
+  #   Value:  !GetAtt MyECRRepository.RepositoryUri  
   Deliverable1:
-    Description: "The URL that responds to the GET request with the value of hard-coded parameter1."
-    Value: !Sub 'https://hometask.${HostedZoneName}/parameter1'
+    Description: "The URI should respond to the GET request with the value of hard-coded parameter1."
+    Value: !Sub '${LoadBalancer.DNSName}/parameter1'
   Deliverable2:
-    Description: "The URL that responds to the GET request with the value of secure parameter2 input at runtime."
-    Value: !Sub 'https://hometask.${HostedZoneName}/parameter2'
-
-
+    Description: "The URI should respond to the GET request with the value of secure parameter2 input at runtime."
+    Value: !Sub 
+              - '${LBDNSName}/parameter2'
+              - LBDNSName: !GetAtt LoadBalancer.DNSName
 
 
 
