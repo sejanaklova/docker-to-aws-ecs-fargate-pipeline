@@ -1,4 +1,5 @@
 # VPC+subnets+EIPs+IGWs+NATGWs+SG, etc create optionally
+# No registered domain needed.
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
@@ -559,6 +560,7 @@ Resources:
           MatchEquals: refs/heads/{Branch}          
   ArtifactBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
 
   # MyTLSCertificate:
   #   Type: AWS::CertificateManager::Certificate

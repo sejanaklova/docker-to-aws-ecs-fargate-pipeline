@@ -1,4 +1,5 @@
 # VPC+subnets+EIPs+IGWs+NATGWs+SG, etc create optionally
+# Things to improve: Add CodeDeploy + GH authen. via CodeStar
 AWSTemplateFormatVersion: 2010-09-09
 
 Parameters:
@@ -560,6 +561,7 @@ Resources:
           MatchEquals: refs/heads/{Branch}          
   ArtifactBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
 
   MyTLSCertificate:
     Type: AWS::CertificateManager::Certificate
