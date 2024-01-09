@@ -1,0 +1,270 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description:  This template creates the VPC skeleton, conditionally.
+Parameters:
+  CreateNetworkComponents:
+    Description: >-
+      "Selecting Yes will create new network resources for this lab and the IDs of existing VPC & subnets if passed to two parameters will be ignored.
+      Selecting No will use the VPC & subnet IDs passed to the next two paramaters."
+    Type: String
+    AllowedValues:
+      - "Yes"
+      - "No"
+    Default: "No"
+  ExistingVPCId:
+    Description: >-
+      "Provide the VPC ID to be used for this task if you selected No to create new network resources."
+    Type: String
+    Default: ""    
+  ExistingSubnetIds:
+    Description: >-
+      "Provide a comma-separated list of public subnet IDs to be used for this task, if you selected No to create new network resources.
+      Leave this field empty if you already selected Yes to create new network resources for this lab."
+    Type: String
+    Default: ""
+  ExistingSGId:
+    Description: >-
+      "Provide the Security Group ID to be used for this task if you selected No to create new network resources."
+    Type: String
+    Default: ""      
+
+Conditions:
+  NewNetworkResources: !Equals [!Ref CreateNetworkComponents, "Yes"]
+
+Resources:
+#Networking infra created conditionally if chosen to do so at runtime
+  HometaskVPC:
+    Type: AWS::EC2::VPC
+    Condition: NewNetworkResources
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: "Name"
+          Value: hometask-vpc
+  HometaskSG:
+    Type: AWS::EC2::SecurityGroup
+    Condition: NewNetworkResources
+    Properties:
+      GroupDescription: "Security Group conditionally created for this task."
+      GroupName: hometask-sg
+      VpcId: !If [NewNetworkResources, !Ref HometaskVPC, !Ref ExistingVPCId]
+  SGIngressHTTPRule:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: '0.0.0.0/0'
+  SGIngressHTTPSRule:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      GroupId: !If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: '0.0.0.0/0'
+  HometaskIGW:
+    Type: AWS::EC2::InternetGateway
+    Condition: NewNetworkResources
+    DependsOn: HometaskVPC
+    Properties:
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-igw'    
+  HometaskIGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: NewNetworkResources    
+    Properties:
+      InternetGatewayId: !Ref HometaskIGW
+      VpcId: !Ref HometaskVPC
+  PublicRT:
+    Type: AWS::EC2::RouteTable
+    Condition: NewNetworkResources 
+    DependsOn:
+      - HometaskIGW
+      - HometaskIGWAttachment
+    Properties:
+      VpcId: !Ref HometaskVPC
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-public-rt'
+  DefaultRouteToIGW:
+    Type: AWS::EC2::Route
+    Condition: NewNetworkResources 
+    DependsOn:
+      - HometaskIGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRT
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref HometaskIGW
+  HometaskPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - HometaskIGW
+      - PublicRT
+    Properties: 
+      VpcId: !Ref HometaskVPC
+      CidrBlock: 10.0.0.0/26
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-public-subnet-a'
+  PublicSubnetRTAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PublicRT
+      SubnetId: !Ref HometaskPublicSubnetA
+  EIPA:
+    Type: AWS::EC2::EIP
+    Condition: NewNetworkResources
+    Properties:
+      Domain: vpc
+  NATGWA:
+    Type: AWS::EC2::NatGateway
+    Condition: NewNetworkResources
+    DependsOn:
+      - EIPA
+    Properties:
+      AllocationId: !GetAtt EIPA.AllocationId
+      SubnetId: !Ref HometaskPublicSubnetA
+      Tags:
+        - Key: Name
+          Value: 'hometask-natgw-a'
+  HometaskPublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - HometaskIGW
+      - PublicRT
+    Properties: 
+      VpcId: !Ref HometaskVPC
+      CidrBlock: 10.0.0.64/26
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-public-subnet-b'
+  PublicSubnetRTAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PublicRT
+      SubnetId: !Ref HometaskPublicSubnetB
+  EIPB:
+    Type: AWS::EC2::EIP
+    Condition: NewNetworkResources
+    Properties:
+      Domain: vpc
+  NATGWB:
+    Type: AWS::EC2::NatGateway
+    Condition: NewNetworkResources
+    DependsOn:
+      - EIPB
+    Properties:
+      AllocationId: !GetAtt EIPB.AllocationId
+      SubnetId: !Ref HometaskPublicSubnetB
+      Tags:
+      - Key: Name
+        Value: 'hometask-natgw-b'
+  PrivateRTA:
+    Type: AWS::EC2::RouteTable
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWA
+    Properties:
+      VpcId: !Ref HometaskVPC
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-private-rt-a'
+  DefaultRouteToNGWA:
+    Type: AWS::EC2::Route
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGWA
+  HometaskPrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWA
+      - PrivateRTA
+    Properties: 
+      VpcId: !Ref HometaskVPC
+      CidrBlock: 10.0.0.128/26
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-private-subnet-a'
+  PrivateSubnetRTAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTA
+      SubnetId: !Ref HometaskPrivateSubnetA 
+  PrivateRTB:
+    Type: AWS::EC2::RouteTable
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWB
+    Properties:
+      VpcId: !Ref HometaskVPC
+      Tags:
+        - Key: "Name"
+          Value: 'hometask-private-rt-b'
+  DefaultRouteToNGWB:
+    Type: AWS::EC2::Route
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGWB
+  HometaskPrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: NewNetworkResources
+    DependsOn:
+      - NATGWB
+      - PrivateRTB
+    Properties: 
+      VpcId: !Ref HometaskVPC
+      CidrBlock: 10.0.0.192/26
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags: 
+        - Key: "Name"
+          Value: 'hometask-private-subnet-b'
+  PrivateSubnetRTAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: NewNetworkResources
+    Properties:
+      RouteTableId: !Ref PrivateRTB
+      SubnetId: !Ref HometaskPrivateSubnetB
+######
+
+Outputs:
+  VPCId:
+    Description: >-
+      "The VPC ID to be used for this task."
+    Value: !Ref HometaskVPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCID'
+  PublicSubnetAId:
+    Description: The subnet ID of hometask-public-subnet-a used for this task.
+    Value: !Ref HometaskPublicSubnetA
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetAId'
+  PublicSubnetBId:
+    Description: The subnet ID of hometask-public-subnet-b used for this task.
+    Value: !Ref HometaskPublicSubnetB
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetBId'      
+  SGId:
+    Description: Security Group ID to be used for this task.
+    Value: !GetAtt HometaskSG.GroupId
+    Export:
+      Name: !Sub '${AWS::StackName}-SGId'
