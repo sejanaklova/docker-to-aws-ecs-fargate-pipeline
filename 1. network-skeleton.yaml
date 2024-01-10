@@ -251,6 +251,7 @@ Outputs:
     Description: >-
       "The VPC ID to be used for this task."
     Value: !Ref HometaskVPC
+    # Value: !If [NewNetworkResources, !Ref HometaskVPC, !Ref ExistingVPCId]    
     Export:
       Name: !Sub '${AWS::StackName}-VPCID'
   PublicSubnetAId:
