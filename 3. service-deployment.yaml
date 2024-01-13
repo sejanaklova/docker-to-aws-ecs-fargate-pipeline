@@ -1,0 +1,487 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates the service's code pipeline, IAM roles+policies needed for this task.
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete      
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Statement:
+          - Action: [ "s3:*" ]
+            Effect: Allow
+            Resource:
+              - !Sub ${ArtifactBucket.Arn}
+              - !Sub '${ArtifactBucket.Arn}/*'
+            Principal:
+              AWS:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+# Using the public third-party extension to delete the S3 bucket created for artifacts. For demo only! 
+  ArtifactBucketDeleter:
+    Type: AwsCommunity::S3::DeleteBucketContents
+    Properties:
+      BucketName: !Ref ArtifactBucket
+##                
+  GHCodestarConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: gh-sn-x-codepipeline-chupa
+      ProviderType: GitHub
+  MyECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      EmptyOnDelete: true
+      RepositoryName: hometask
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      # ImageTagMutability: MUTABLE
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowPushPull
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"      
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: CodeBuildProject
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: buildspec.yml
+      ServiceRole: !Ref CodeBuildRole
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_ECR_REPOSITORY_URI
+            Value: !GetAtt MyECRRepository.RepositoryUri
+          - Name: IMAGE_REPO_NAME
+            Value: !Ref MyECRRepository
+          - Name: IMAGE_TAG
+            Value: "latest"
+      Artifacts:
+        Name: "hometask-build"
+        Type: CODEPIPELINE
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      # MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - !Ref CloudWatchLogsPolicy
+        - !Ref CodeBuildBasePolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+      Policies:
+        - PolicyName: "PushImageToEcr"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+        - PolicyName: "CodeBuildLogsRole"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+        - PolicyName: "GetAndPutArtifacts"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub ${ArtifactBucket.Arn}/*
+
+
+
+  # CodeBuildProject:
+  #   Type: AWS::CodeBuild::Project
+  #   Properties:
+  #     Name: CodeBuildProject
+  #     ServiceRole: !Ref CodeBuildRole
+  #     Source:
+  #       Type: CODEPIPELINE
+  #       BuildSpec: buildspec.yml
+  #     Artifacts:
+  #       Type: CODEPIPELINE
+  #     Environment:
+  #       Type: LINUX_CONTAINER
+  #       ComputeType: BUILD_GENERAL1_SMALL
+  #       Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
+  #       PrivilegedMode: true
+  #       EnvironmentVariables:
+  #         - Name: AWS_DEFAULT_REGION
+  #           Value: !Ref AWS::Region
+  #         - Name: AWS_ACCOUNT_ID
+  #           Value: !Ref AWS::AccountId
+  #         - Name: AWS_ECR_REPOSITORY_URI
+  #           Value: !GetAtt MyECRRepository.RepositoryUri
+  #         - Name: IMAGE_REPO_NAME
+  #           Value: !Ref MyECRRepository
+  #         - Name: IMAGE_TAG
+  #           Value: "latest"
+  # MySSMParameter:
+  #   Type: AWS::SSM::Parameter
+  #   Properties:
+  #     Name: !Sub "/hometask/secure-parameter"
+  #     Description: "Parameter input at the runtime."
+  #     Tier: "Standard"
+  #     Type: String
+  #     Value: !Ref SecureParameter 
+  # MyCWLogGroup:
+  #   Type: AWS::Logs::LogGroup
+  #   Properties:
+  #     LogGroupName: !Sub '/hometask'
+  #     RetentionInDays: 7
+  # TaskRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     Description: "Grants containers permissions to call AWS APIs on your behalf"
+  #     AssumeRolePolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Sid: ''
+  #           Effect: Allow
+  #           Principal:
+  #             Service: ecs-tasks.amazonaws.com
+  #           Action: 'sts:AssumeRole'
+  #     Policies: 
+  #       - PolicyName: hometask-taskRole-inlinepolicy
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             - Sid: TaskStatement1
+  #               Effect: Allow
+  #               Action:
+  #                 - 'ssm:GetParametersByPath'
+  #                 - 'ssm:GetParameters'
+  #                 - 'ssm:GetParameter'
+  #               Resource:
+  #                 Fn::Sub:
+  #                   'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/hometask/secure-parameter'
+  #     RoleName: !Sub '${AWS::Region}-hometask-taskRole'
+  # TaskExecutionRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     Description: "Allows ECS tasks to call AWS services on your behalf."
+  #     AssumeRolePolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Sid: ''
+  #           Effect: Allow
+  #           Principal:
+  #             Service: ecs-tasks.amazonaws.com
+  #           Action: 'sts:AssumeRole'
+  #     Policies: 
+  #       - PolicyName: hometask-taskExecutionRole-inlinepolicy
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             - Sid: TaskExecutionStatement1
+  #               Effect: Allow
+  #               Action:
+  #                 - 'ecr:GetAuthorizationToken'
+  #               Resource: '*'
+  #             - Sid: TaskExecutionStatement2
+  #               Effect: Allow
+  #               Action:
+  #                 - 'logs:CreateLogGroup'
+  #                 - 'logs:CreateLogStream'
+  #                 - 'logs:PutLogEvents'
+  #                 - 'logs:DescribeLogStreams'
+  #               Resource: 'arn:aws:logs:*:*:*'
+  #             - Sid: TaskExecutionStatement3
+  #               Effect: Allow
+  #               Action:
+  #                 - 'ecr:BatchCheckLayerAvailability'
+  #                 - 'ecr:GetDownloadUrlForLayer'
+  #                 - 'ecr:BatchGetImage'
+  #               Resource: !GetAtt MyECRRepository.Arn
+  #     RoleName: !Sub '${AWS::Region}-hometask-taskExecutionRole'     
+  # ECSCluster:
+  #   Type: AWS::ECS::Cluster
+  #   Properties:
+  #     ClusterName: hometask-cluster
+  #     CapacityProviders:
+  #     - FARGATE
+  #     - FARGATE_SPOT
+  #     ClusterSettings:
+  #     - Name: containerInsights
+  #       Value: disabled
+  #     Configuration:
+  #       ExecuteCommandConfiguration:
+  #         Logging: DEFAULT
+  #     # ServiceConnectDefaults:
+  #     #   Namespace: ECSClusterNamespace
+  # CodePipeline:
+  #   Type: AWS::CodePipeline::Pipeline
+  #   Properties:
+  #     Name: ECSPipeline
+  #     ArtifactStore:
+  #       Type: S3
+  #       Location: !Ref ArtifactBucket
+  #     RestartExecutionOnUpdate: true
+  #     RoleArn: !GetAtt CodePipelineRole.Arn
+  #     Stages:
+  #       - Name: Source
+  #         Actions:
+  #           - Name: SourceAction
+  #             ActionTypeId:
+  #               Category: Source
+  #               Owner: AWS
+  #               Provider: CodeStarSourceConnection
+  #               Version: 1
+  #             OutputArtifacts:
+  #               - Name: SourceCode
+  #             Configuration:
+  #               ConnectionArn: !Ref GHCodestarConnection
+  #               FullRepositoryId: !Ref FullGitHubRepositoryName
+  #               BranchName: !Ref GithubBranch
+  #             Region: !Ref AWS::Region
+  #             Namespace: "SourceActionVariables"
+  #             RunOrder: 1
+  #       - Name: Build
+  #         Actions:
+  #           - Name: BuildAction
+  #             ActionTypeId:
+  #               Category: Build
+  #               Owner: AWS
+  #               Version: '1'
+  #               Provider: CodeBuild
+  #             InputArtifacts:
+  #               - Name: SourceCode
+  #             Configuration:
+  #               ProjectName: !Ref CodeBuildProject
+  #             OutputArtifacts:
+  #               - Name: BuildOutput
+  #             RunOrder: 1
+  #             Namespace: "BuildActionVariables"
+  #   DependsOn: MyECRRepository
+  # CodePipelineRole:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service: codepipeline.amazonaws.com
+  #           Action:
+  #             - "sts:AssumeRole"
+  #     Policies:
+  #       - PolicyName: "GetAndPutArtifacts"
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             - Effect: "Allow"
+  #               Action:
+  #                 - s3:GetObject
+  #                 - s3:PutObject
+  #                 - s3:ListBucket
+  #               Resource:
+  #                 - !GetAtt ArtifactBucket.Arn
+  #                 - !Sub ${ArtifactBucket.Arn}/*
+  #       - PolicyName: "StartCodeBuild"
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             - Effect: "Allow"
+  #               Action:
+  #                 - codebuild:StartBuild
+  #                 - codebuild:BatchGetBuilds
+  #               Resource:
+  #                 - !GetAtt CodeBuildProject.Arn
+  #     ####                  
+  #       - PolicyName: "UseCodestarConnection"
+  #         PolicyDocument:
+  #           Version: "2012-10-17"
+  #           Statement:
+  #             - Effect: "Allow"
+  #               Action:
+  #                 - codestar-connections:UseConnection
+  #               Resource:
+  #                 - "*"
+  #     ####  
+  # ECSService:
+  #   Type: AWS::ECS::Service
+  #   DependsOn:
+  #     - HTTPListener
+  #   Properties:
+  #     Cluster: !Ref ECSCluster
+  #     CapacityProviderStrategy:
+  #       - CapacityProvider: FARGATE
+  #         Base: 0
+  #         Weight: 1
+  #     TaskDefinition: !Ref MyTaskDefinition
+  #     ServiceName: hometask-service
+  #     SchedulingStrategy: REPLICA
+  #     DesiredCount: 1
+  #     LoadBalancers:
+  #       - ContainerName: hometask
+  #         ContainerPort: 80
+  #         LoadBalancerName: !Ref 'AWS::NoValue'
+  #         TargetGroupArn: !Ref TargetGroup
+  #     HealthCheckGracePeriodSeconds: '10'
+  #     NetworkConfiguration:
+  #       AwsvpcConfiguration:
+  #         AssignPublicIp: ENABLED
+  #         SecurityGroups: [!If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]]
+  #         Subnets:
+  #             Fn::If:
+  #               - NewNetworkResources
+  #               - [ !Ref HometaskPublicSubnetA, !Ref HometaskPublicSubnetB ]
+  #               - Fn::Split:
+  #                 - ","
+  #                 - !Ref ExistingSubnetIds
+  #     PlatformVersion: LATEST
+  #     DeploymentConfiguration:
+  #       MaximumPercent: 200
+  #       MinimumHealthyPercent: 100
+  #       DeploymentCircuitBreaker:
+  #         Enable: true
+  #         Rollback: true
+  #     DeploymentController:
+  #       Type: ECS
+  #     ServiceConnectConfiguration:
+  #       Enabled: false
+  #     EnableECSManagedTags: true
+  # MyTaskDefinition:
+  #   Type: AWS::ECS::TaskDefinition
+  #   Properties:
+  #     ContainerDefinitions: 
+  #       - Name: hometask
+  #         Image: !GetAtt MyECRRepository.RepositoryUri
+  #         Cpu: 0
+  #         Links: []
+  #         PortMappings: 
+  #           - ContainerPort: 80
+  #             HostPort: 80
+  #             Protocol: tcp
+  #         Essential: true
+  #         EntryPoint: []
+  #         Command: []
+  #         Environment:
+  #           - Name: PORT
+  #             Value: '80'
+  #           - Name: PARAMETER_1_VALUE
+  #             Value: "Hard coded"
+  #           - Name: PARAMETER_2_NAME
+  #             Value: !Ref MySSMParameter
+  #         EnvironmentFiles: []
+  #         MountPoints: []
+  #         VolumesFrom: []
+  #         DnsServers: []
+  #         DnsSearchDomains: []
+  #         ExtraHosts: []
+  #         DockerSecurityOptions: []
+  #         DockerLabels: {}
+  #         Ulimits: []
+  #         LogConfiguration:
+  #           LogDriver: awslogs
+  #           Options:
+  #             awslogs-group: !Ref MyCWLogGroup
+  #             awslogs-region: !Sub '${AWS::Region}'
+  #             awslogs-stream-prefix: 'hometask'
+  #           SecretOptions: []
+  #         SystemControls: []
+  #     Cpu: "256"
+  #     Family: 'hometask'
+  #     Memory: "512"
+  #     NetworkMode: "awsvpc"
+  #     RequiresCompatibilities: 
+  #       - "FARGATE"
+  #     TaskRoleArn: !GetAtt TaskRole.Arn
+  #     ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+  #     Tags:
+  #       - Key: "Workshop name"
+  #         Value: 'hometask'            
+  # LoadBalancer:
+  #   Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  #   Properties:
+  #     Type: application
+  #     Name: "hometask"
+  #     SecurityGroups: [!If [NewNetworkResources, !GetAtt HometaskSG.GroupId, !Ref ExistingSGId]]
+  #     Subnets:
+  #         Fn::If:
+  #           - NewNetworkResources
+  #           - [ !Ref HometaskPublicSubnetA, !Ref HometaskPublicSubnetB ]
+  #           - Fn::Split:
+  #             - ","
+  #             - !Ref ExistingSubnetIds
+  # TargetGroup:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties:
+  #     HealthCheckPath: "/parameter1"
+  #     Name: "hometask"
+  #     Port: 80
+  #     Protocol: HTTP
+  #     TargetType: ip
+  #     HealthCheckProtocol: HTTP
+  #     VpcId: !If [NewNetworkResources, !Ref HometaskVPC, !Ref ExistingVPCId]
+  # HTTPListener:
+  #   Type: 'AWS::ElasticLoadBalancingV2::Listener'
+  #   Properties:
+  #     DefaultActions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref TargetGroup
+  #     LoadBalancerArn: !Ref LoadBalancer
+  #     Port: 80
+  #     Protocol: HTTP
+
+Outputs:
+  CodePipelineArtifactBucket:
+    Description: S3 bucket that will be used for CodePipeline Artifacts in another stack.
+    Value: !Ref ArtifactBucket
+    Export:
+      Name: CodePipelineArtifactBucket
+  GHCodestarConnectionARN:
+    Description: ARN of GitHub account & Codestar connection.
+    Value: !Ref GHCodestarConnection
+    Export:
+      Name: GHCodestarConnectionARN
