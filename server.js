@@ -18,7 +18,7 @@ app.use((req, res, next) => {
 
 app.all('/parameter1', (req, res) => {
     const parameterValue = process.env.PARAMETER_1_VALUE || 'Parameter not found';
-    res.send(`The static parameter value is: ${parameterValue}`);
+    res.send(`The static parameter 1 value is: ${parameterValue}`);
 });
 
 app.all('/parameter2', async (req, res) => {
