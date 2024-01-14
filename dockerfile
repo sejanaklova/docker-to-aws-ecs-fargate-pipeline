@@ -1,4 +1,4 @@
-FROM node:12-alpine3.14
+FROM public.ecr.aws/docker/library/node:12-alpine3.14
 WORKDIR /app
 COPY package.json /app
 RUN npm init --yes; npm install express aws-sdk --save
