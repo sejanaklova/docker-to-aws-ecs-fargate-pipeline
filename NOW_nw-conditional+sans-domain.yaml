@@ -29,7 +29,7 @@ Parameters:
     AllowedValues:
       - "main"
       - "optimising-cfn-stacks"    
-    Default: "main"
+    Default: "optimising-cfn-stacks"
   # NotificationEmail:
   #   Type: String
   #   Description: Email address where notifications will be sent
@@ -43,7 +43,7 @@ Parameters:
     AllowedValues:
       - "Yes"
       - "No"
-    Default: "No"
+    Default: "Yes"
   ExistingVPCId:
     Description: >-
       "Provide the VPC ID to be used for this task if you selected No to create new network resources."
