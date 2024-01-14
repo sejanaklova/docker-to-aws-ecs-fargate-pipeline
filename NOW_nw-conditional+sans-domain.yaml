@@ -400,17 +400,17 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux2-x86_64-standard:4.0
         PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: AWS_DEFAULT_REGION
-            Value: !Ref AWS::Region
-          - Name: AWS_ACCOUNT_ID
-            Value: !Ref AWS::AccountId
-          - Name: AWS_ECR_REPOSITORY_URI
-            Value: !GetAtt MyECRRepository.RepositoryUri
-          - Name: IMAGE_REPO_NAME
-            Value: !Ref MyECRRepository
-          - Name: IMAGE_TAG
-            Value: "latest"
+        # EnvironmentVariables:
+        #   - Name: AWS_DEFAULT_REGION
+        #     Value: !Ref AWS::Region
+        #   - Name: AWS_ACCOUNT_ID
+        #     Value: !Ref AWS::AccountId
+        #   - Name: AWS_ECR_REPOSITORY_URI
+        #     Value: !GetAtt MyECRRepository.RepositoryUri
+        #   - Name: IMAGE_REPO_NAME
+        #     Value: !Ref MyECRRepository
+        #   - Name: IMAGE_TAG
+        #     Value: "latest"
 
   CodePipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -430,15 +430,16 @@ Resources:
                 Category: Source
                 Owner: ThirdParty
                 Version: 1
-                Provider: GitHub
-              OutputArtifacts:
-                - Name: SourceCode
+                Provider: GitHub             
               Configuration:
                 Owner: !Ref GithubAccount
                 Repo: !Ref GithubRepository
                 Branch: !Ref GithubBranch
                 PollForSourceChanges: false
                 OAuthToken: !Ref GithubAuthToken
+              OutputArtifacts:
+                - Name: SourceCode
+              Namespace: "SourceVariables"
               RunOrder: 1
         - Name: Build
           Actions:
@@ -452,9 +453,11 @@ Resources:
                 - Name: SourceCode
               Configuration:
                 ProjectName: !Ref CodeBuildProject
+                EnvironmentVariables: !Sub "[{\"name\":\"AWS_DEFAULT_REGION\",\"value\":\"${AWS::Region}\",\"type\":\"PLAINTEXT\"},{\"name\":\"AWS_ACCOUNT_ID\",\"value\":\"${AWS::AccountId}\",\"type\":\"PLAINTEXT\"},{\"name\":\"AWS_ECR_REPOSITORY_URI\",\"value\":\"${MyECRRepository.RepositoryUri}\",\"type\":\"PLAINTEXT\"},{\"name\":\"IMAGE_REPO_NAME\",\"value\":\"${MyECRRepository}\",\"type\":\"PLAINTEXT\"},{\"name\":\"IMAGE_TAG\",\"value\":\"latest\",\"type\":\"PLAINTEXT\"}]"
               OutputArtifacts:
                 - Name: BuildOutput
-              RunOrder: 2
+              Namespace: "BuildVariables"
+              RunOrder: 1
     DependsOn: MyECRRepository
      
   CodePipelineRole:
@@ -465,37 +468,162 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: codepipeline.amazonaws.com
+              Service: [ codepipeline.amazonaws.com, cloudformation.amazonaws.com]
             Action:
               - "sts:AssumeRole"
       Policies:
-        - PolicyName: "GetAndPutArtifacts"
+        - PolicyName: "CodePipeline-resources-needed-policy"
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: 2012-10-17
             Statement:
-              - Effect: "Allow"
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:ListBucket
-                Resource:
-                  - !GetAtt ArtifactBucket.Arn
-                  - !Sub ${ArtifactBucket.Arn}/*
-        - PolicyName: "StartCodeBuild"
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: "Allow"
-                Action:
-                  - codebuild:StartBuild
+              - Action:
+                  - iam:PassRole
+                Resource: '*'
+                Effect: Allow
+                Condition:
+                  StringEqualsIfExists:
+                    iam:PassedToService:
+                      - cloudformation.amazonaws.com
+                      - elasticbeanstalk.amazonaws.com
+                      - ec2.amazonaws.com
+                      - ecs-tasks.amazonaws.com
+              - Action:
+                  - codecommit:CancelUploadArchive
+                  - codecommit:GetBranch
+                  - codecommit:GetCommit
+                  - codecommit:GetUploadArchiveStatus
+                  - codecommit:UploadArchive
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplication
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - codestar-connections:UseConnection
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - elasticbeanstalk:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - autoscaling:*
+                  - cloudwatch:*
+                  - s3:*
+                  - sns:*
+                  - cloudformation:*
+                  - rds:*
+                  - sqs:*
+                  - ecs:*
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - lambda:InvokeFunction
+                  - lambda:ListFunctions
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - opsworks:CreateDeployment
+                  - opsworks:DescribeApps
+                  - opsworks:DescribeCommands
+                  - opsworks:DescribeDeployments
+                  - opsworks:DescribeInstances
+                  - opsworks:DescribeStacks
+                  - opsworks:UpdateApp
+                  - opsworks:UpdateStack
+                Resource: '*'
+                Effect: Allow
+              - Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:UpdateStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:SetStackPolicy
+                  - cloudformation:ValidateTemplate
+                Resource: '*'
+                Effect: Allow
+              - Action:
                   - codebuild:BatchGetBuilds
-                Resource:
-                  - !GetAtt CodeBuildProject.Arn
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuildBatches
+                  - codebuild:StartBuildBatch
+                Resource: '*'
+                Effect: Allow
+              - Effect: Allow
+                Action:
+                  - devicefarm:ListProjects
+                  - devicefarm:ListDevicePools
+                  - devicefarm:GetRun
+                  - devicefarm:GetUpload
+                  - devicefarm:CreateUpload
+                  - devicefarm:ScheduleRun
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - servicecatalog:ListProvisioningArtifacts
+                  - servicecatalog:CreateProvisioningArtifact
+                  - servicecatalog:DescribeProvisioningArtifact
+                  - servicecatalog:DeleteProvisioningArtifact
+                  - servicecatalog:UpdateProduct
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:DescribeImages
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - states:DescribeExecution
+                  - states:DescribeStateMachine
+                  - states:StartExecution
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - appconfig:StartDeployment
+                  - appconfig:StopDeployment
+                  - appconfig:GetDeployment
+                Resource: '*'
+
+        # - PolicyName: "GetAndPutArtifacts"
+        #   PolicyDocument:
+        #     Version: "2012-10-17"
+        #     Statement:
+        #       - Effect: "Allow"
+        #         Action:
+        #           - s3:GetObject
+        #           - s3:PutObject
+        #           - s3:ListBucket
+        #         Resource:
+        #           - !GetAtt ArtifactBucket.Arn
+        #           - !Sub ${ArtifactBucket.Arn}/*
+        # - PolicyName: "StartCodeBuild"
+        #   PolicyDocument:
+        #     Version: "2012-10-17"
+        #     Statement:
+        #       - Effect: "Allow"
+        #         Action:
+        #           - codebuild:StartBuild
+        #           - codebuild:BatchGetBuilds
+        #         Resource:
+        #           - !GetAtt CodeBuildProject.Arn
+
   CodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: 2012-10-17
         Statement:
           - Effect: Allow
             Principal:
@@ -506,7 +634,7 @@ Resources:
       Policies:
         - PolicyName: "PushImageToEcr"
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
@@ -521,7 +649,7 @@ Resources:
                 Resource: "*"
         - PolicyName: "CodeBuildLogsRole"
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
@@ -542,6 +670,64 @@ Resources:
                 Resource:
                   - !GetAtt ArtifactBucket.Arn
                   - !Sub ${ArtifactBucket.Arn}/*
+  CfnDeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: "CRUDLcloudformation"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:UpdateStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:SetStackPolicy
+                  - cloudformation:ValidateTemplate
+                Resource: "*"
+        - PolicyName: "PushImageToEcr"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+        - PolicyName: "GetAndPutArtifacts"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !Sub ${ArtifactBucket.Arn}/*
+
   GithubWebhook:
     Type: "AWS::CodePipeline::Webhook"
     Properties:
