@@ -18,7 +18,7 @@ app.use((req, res, next) => {
 
 app.all('/parameter1', (req, res) => {
     const parameterValue = process.env.PARAMETER_1_VALUE || 'Parameter not found';
-    res.send(`The parameter value is: ${parameterValue}`);
+    res.send(`The static parameter value is: ${parameterValue}`);
 });
 
 app.all('/parameter2', async (req, res) => {
@@ -30,7 +30,7 @@ app.all('/parameter2', async (req, res) => {
 
         const parameterValue = data.Parameter.Value;
 
-        res.send(`The parameter value is: ${parameterValue}`);
+        res.send(`The SSM parameter value is: ${parameterValue}`);
     } catch (error) {
         console.error(error);
         res.status(500).send('An error occurred while retrieving the parameter.');
